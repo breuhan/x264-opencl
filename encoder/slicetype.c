@@ -36,6 +36,15 @@ static int x264_slicetype_frame_cost( x264_t *h, x264_mb_analysis_t *a,
                                       x264_frame_t **frames, int p0, int p1, int b,
                                       int b_intra_penalty );
 
+static void x264_weights_analyse( x264_t *h, x264_frame_t *fenc, x264_frame_t *ref, int b_lookahead );
+
+#if HAVE_OPENCL
+#ifdef _WIN32
+#include "windows.h"
+#endif
+#include "slicetype-cl.c"
+#endif
+
 static void x264_lowres_context_init( x264_t *h, x264_mb_analysis_t *a )
 {
     a->i_qp = X264_LOOKAHEAD_QP;
@@ -1454,6 +1463,61 @@ void x264_slicetype_analyse( x264_t *h, int intra_minigop )
         return;
     }
 
+#if HAVE_OPENCL
+#ifdef _WIN32
+    int my_pri = THREAD_PRIORITY_NORMAL, ocl_pri = THREAD_PRIORITY_NORMAL;
+#endif
+
+    if( h->param.b_opencl )
+    {
+#ifdef _WIN32
+#define CL_QUEUE_THREAD_HANDLE_AMD 0x403E
+        HANDLE id = GetCurrentThread();
+        my_pri = GetThreadPriority( id );
+        SetThreadPriority( id, THREAD_PRIORITY_ABOVE_NORMAL );
+        cl_int status = clGetCommandQueueInfo( h->opencl.queue, CL_QUEUE_THREAD_HANDLE_AMD, sizeof(HANDLE), &id, NULL );
+        if( status == CL_SUCCESS )
+        {
+            ocl_pri = GetThreadPriority( id );
+            SetThreadPriority( id, THREAD_PRIORITY_ABOVE_NORMAL );
+        }
+#endif
+
+        int b_work_done = 0;
+
+        /* precalculate intra and I frames */
+        for( int i = 0; i <= num_frames; i++ )
+        {
+            b_work_done |= x264_opencl_lowres_init( h, frames[i], a.i_lambda );
+        }
+        if( b_work_done && h->param.analyse.i_weighted_pred )
+        {
+            /* weightp estimation requires intra costs to be on the CPU */
+            x264_opencl_flush( h );
+        }
+
+        if( h->param.i_bframe && h->param.i_bframe_adaptive == X264_B_ADAPT_TRELLIS )
+        {
+            /* Precalculate motion searches in both directions */
+            for( int i = 0; i < num_frames; i++ )
+            {
+                for (int b = 0; b < h->param.i_bframe; b++)
+                {
+                    if (i <= b)
+                    {
+                        break;
+                    }
+
+                    b_work_done |= x264_opencl_precalculate_frame_cost( h, &a, frames, i, i-b-1, i-b-1 );
+                    b_work_done |= x264_opencl_precalculate_frame_cost( h, &a, frames, i-b-1, i, i );
+                }
+            }
+        }
+        if( b_work_done )
+            x264_opencl_flush( h );
+    }
+#endif
+
     if( h->param.i_bframe )
     {
         if( h->param.i_bframe_adaptive == X264_B_ADAPT_TRELLIS )
@@ -1486,6 +1550,18 @@ void x264_slicetype_analyse( x264_t *h, int intra_minigop )
                     i += 2;
                     continue;
                 }
+
+#if HAVE_OPENCL
+                if( h->param.b_opencl )
+                {
+                    int b_work_done = 0;
+                    b_work_done |= x264_opencl_precalculate_frame_cost(h, &a, frames, i+0, i+2, i+1 );
+                    b_work_done |= x264_opencl_precalculate_frame_cost(h, &a, frames, i+0, i+1, i+1 );
+                    b_work_done |= x264_opencl_precalculate_frame_cost(h, &a, frames, i+1, i+2, i+2 );
+                    if( b_work_done )
+                        x264_opencl_flush( h );
+                }
+#endif
 
                 cost1b1 = x264_slicetype_frame_cost( h, &a, frames, i+0, i+2, i+1, 0 );
                 cost1p0 = x264_slicetype_frame_cost( h, &a, frames, i+0, i+1, i+1, 0 );
@@ -1569,6 +1645,19 @@ void x264_slicetype_analyse( x264_t *h, int intra_minigop )
     /* Restore frametypes for all frames that haven't actually been decided yet. */
     for( int j = reset_start; j <= num_frames; j++ )
         frames[j]->i_type = X264_TYPE_AUTO;
+
+#ifdef _WIN32
+#if HAVE_OPENCL
+    if( h->param.b_opencl )
+    {
+        HANDLE id = GetCurrentThread();
+        SetThreadPriority( id, my_pri );
+        cl_int status = clGetCommandQueueInfo( h->opencl.queue, CL_QUEUE_THREAD_HANDLE_AMD, sizeof(HANDLE), &id, NULL );
+        if( status == CL_SUCCESS )
+            SetThreadPriority( id, ocl_pri );
+    }
+#endif
+#endif
 }
 
 void x264_slicetype_decide( x264_t *h )

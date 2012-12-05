@@ -8,6 +8,8 @@ vpath %.S $(SRCPATH)
 vpath %.asm $(SRCPATH)
 vpath %.rc $(SRCPATH)
 
+GENERATED =
+
 all: default
 default:
 
@@ -145,6 +147,36 @@ OBJSO  += $(if $(RC), x264res.dll.o)
 endif
 endif
 
+QUOTED_CFLAGS := $(CFLAGS)
+
+ifeq ($(HAVE_OPENCL),yes)
+empty:=
+space:=$(empty) $(empty)
+escaped:=\ $(empty)
+open:=(
+escopen:=\(
+close:=)
+escclose:=\)
+SAFE_INC_DIR := $(subst $(space),$(escaped),$(OPENCL_INC_DIR))
+SAFE_INC_DIR := $(subst $(open),$(escopen),$(SAFE_INC_DIR))
+SAFE_INC_DIR := $(subst $(close),$(escclose),$(SAFE_INC_DIR))
+SAFE_LIB_DIR := $(subst $(space),$(escaped),$(OPENCL_LIB_DIR))
+SAFE_LIB_DIR := $(subst $(open),$(escopen),$(SAFE_LIB_DIR))
+SAFE_LIB_DIR := $(subst $(close),$(escclose),$(SAFE_LIB_DIR))
+# For normal CFLAGS and LDFLAGS, we must escape spaces with a backslash to
+# make gcc happy
+CFLAGS += -I$(SAFE_INC_DIR)
+LDFLAGS += -framework OpenCL -L$(SAFE_LIB_DIR)
+# For the CFLAGS used by the .depend rule, we must add quotes because
+# the rule does an extra level of shell expansions
+QUOTED_CFLAGS += -I"$(OPENCL_INC_DIR)"
+encoder/oclobj.h: common/opencl/x264-cl.h $(wildcard common/opencl/*.cl)
+	echo "static const char x264_opencl_source [] = {" > $@
+	cat $^ | xxd -i >> $@
+	echo ",0x00 };" >> $@
+GENERATED += encoder/oclobj.h
+endif
+
 OBJS   += $(SRCS:%.c=%.o)
 OBJCLI += $(SRCCLI:%.c=%.o)
 OBJSO  += $(SRCSO:%.c=%.o)
@@ -164,16 +196,21 @@ $(SONAME): .depend $(OBJS) $(OBJASM) $(OBJSO)
 	$(LD)$@ $(OBJS) $(OBJASM) $(OBJSO) $(SOFLAGS) $(LDFLAGS)
 
 ifneq ($(EXE),)
-.PHONY: x264 checkasm
+.PHONY: x264 checkasm test-opencl
 x264: x264$(EXE)
 checkasm: checkasm$(EXE)
+test-opencl: test-opencl$(EXE)
 endif
 
-x264$(EXE): .depend $(OBJCLI) $(CLI_LIBX264)
+x264$(EXE): $(GENERATED) .depend $(OBJCLI) $(CLI_LIBX264)
 	$(LD)$@ $(OBJCLI) $(CLI_LIBX264) $(LDFLAGSCLI) $(LDFLAGS)
 
-checkasm$(EXE): .depend $(OBJCHK) $(LIBX264)
+checkasm$(EXE): $(GENERATED) .depend $(OBJCHK) $(LIBX264)
 	$(LD)$@ $(OBJCHK) $(LIBX264) $(LDFLAGS)
+
+OBJOCL = tools/test-opencl.o
+test-opencl$(EXE): .depend ${OBJOCL} $(LIBX264)
+	$(LD)$@ $(OBJOCL) $(LIBX264) $(LDFLAGS)
 
 $(OBJS) $(OBJASM) $(OBJSO) $(OBJCLI) $(OBJCHK): .depend
 
@@ -193,7 +230,7 @@ $(OBJS) $(OBJASM) $(OBJSO) $(OBJCLI) $(OBJCHK): .depend
 
 .depend: config.mak
 	@rm -f .depend
-	@$(foreach SRC, $(addprefix $(SRCPATH)/, $(SRCS) $(SRCCLI) $(SRCSO)), $(CC) $(CFLAGS) $(SRC) $(DEPMT) $(SRC:$(SRCPATH)/%.c=%.o) $(DEPMM) 1>> .depend;)
+	@$(foreach SRC, $(addprefix $(SRCPATH)/, $(SRCS) $(SRCCLI) $(SRCSO)), $(CC) $(QUOTED_CFLAGS) $(SRC) $(DEPMT) $(SRC:$(SRCPATH)/%.c=%.o) $(DEPMM) 1>> .depend;)
 
 config.mak:
 	./configure
@@ -231,7 +268,7 @@ endif
 
 clean:
 	rm -f $(OBJS) $(OBJASM) $(OBJCLI) $(OBJSO) $(SONAME) *.a *.lib *.exp *.pdb x264 x264.exe .depend TAGS
-	rm -f checkasm checkasm.exe $(OBJCHK)
+	rm -f checkasm checkasm.exe $(OBJCHK) $(GENERATED) x264_lookahead.clbin
 	rm -f $(SRC2:%.c=%.gcda) $(SRC2:%.c=%.gcno) *.dyn pgopti.dpi pgopti.dpi.lock
 
 distclean: clean

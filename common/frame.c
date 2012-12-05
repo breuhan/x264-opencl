@@ -262,6 +262,23 @@ fail:
     return NULL;
 }
 
+#if HAVE_OPENCL
+static void x264_opencl_frame_delete( x264_frame_t *frame )
+{
+#define RELEASEBUF(mem) if( mem ) clReleaseMemObject( mem );
+    for( int j = 0; j < NUM_IMAGE_SCALES; j++ )
+        RELEASEBUF( frame->opencl.scaled_image2Ds[j] );
+    RELEASEBUF( frame->opencl.luma_hpel );
+    RELEASEBUF( frame->opencl.inv_qscale_factor );
+    RELEASEBUF( frame->opencl.intra_cost );
+    RELEASEBUF( frame->opencl.lowres_mvs0 );
+    RELEASEBUF( frame->opencl.lowres_mvs1 );
+    RELEASEBUF( frame->opencl.lowres_mv_costs0 );
+    RELEASEBUF( frame->opencl.lowres_mv_costs1 );
+#undef RELEASEBUF
+}
+#endif
+
 void x264_frame_delete( x264_frame_t *frame )
 {
     /* Duplicate frames are blank copies of real frames (including pointers),
@@ -316,6 +333,9 @@ void x264_frame_delete( x264_frame_t *frame )
         }
         x264_pthread_mutex_destroy( &frame->mutex );
         x264_pthread_cond_destroy( &frame->cv );
+#if HAVE_OPENCL
+        x264_opencl_frame_delete( frame );
+#endif
     }
     x264_free( frame );
 }

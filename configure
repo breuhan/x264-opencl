@@ -25,6 +25,7 @@ Configuration options:
   --system-libx264         use system libx264 instead of internal
   --enable-shared          build shared library
   --enable-static          build static library
+  --disable-opencl         disable OpenCL features
   --disable-gpl            disable GPL-only features
   --disable-thread         disable multithreaded encoding
   --enable-win32thread     use win32threads (windows only)
@@ -273,6 +274,7 @@ vis="no"
 bit_depth="8"
 chroma_format="all"
 compiler="GNU"
+opencl="yes"
 
 CFLAGS="$CFLAGS -Wall -I. -I\$(SRCPATH)"
 LDFLAGS="$LDFLAGS"
@@ -380,6 +382,9 @@ for opt do
             ;;
         --host=*)
             host="$optarg"
+            ;;
+        --disable-opencl)
+            opencl="no"
             ;;
         --cross-prefix=*)
             cross_prefix="$optarg"
@@ -1107,6 +1112,43 @@ PROF_USE_CC=$PROF_USE_CC
 PROF_USE_LD=$PROF_USE_LD
 EOF
 
+if [ "$opencl" = "yes" ]; then
+    log_check "looking for xxd"
+    if ! $(xxd -v 2>/dev/null); then
+        echo 'OpenCL support requires xxd to compile.'
+        echo 'use --disable-opencl to compile without OpenCL' 
+        exit 1
+    elif [ "$CUDA_PATH" != "" ]; then
+        echo 'HAVE_OPENCL=yes' >> config.mak
+        echo 'OPENCL_LIB=OpenCL' >> config.mak
+        echo 'OPENCL_INC_DIR=$(CUDA_PATH)include' >> config.mak
+        if [ "$ARCH" = "X86" ]; then
+            echo 'OPENCL_LIB_DIR=$(CUDA_PATH)lib/Win32' >> config.mak
+        else
+            echo 'OPENCL_LIB_DIR=$(CUDA_PATH)lib/x64' >> config.mak
+        fi
+        define HAVE_OPENCL
+    elif [ "$AMDAPPSDKROOT" != "" ]; then
+        echo 'HAVE_OPENCL=yes' >> config.mak
+        echo 'OPENCL_LIB=OpenCL' >> config.mak
+        echo 'OPENCL_INC_DIR=$(AMDAPPSDKROOT)/include' >> config.mak
+        if [ "$ARCH" = "X86" ]; then
+            echo 'OPENCL_LIB_DIR=$(AMDAPPSDKROOT)/lib/x86' >> config.mak
+        else
+            echo 'OPENCL_LIB_DIR=$(AMDAPPSDKROOT)/lib/x86_64' >> config.mak
+        fi
+        define HAVE_OPENCL
+    elif [ "mac" == "mac" ]; then
+        echo 'HAVE_OPENCL=yes' >> config.mak
+        echo 'OPENCL_LIB=OpenCL' >> config.mak
+        echo 'OPENCL_INC_DIR=/System/Library/Frameworks/OpenCL.framework/Versions/A/Headers/' >> config.mak
+        echo 'OPENCL_LIB_DIR=/System/Library/Frameworks/OpenCL.framework/Versions/A/Libraries/' >> config.mak
+        define HAVE_OPENCL
+    else
+        opencl="no"
+    fi
+fi
+
 if [ $compiler = ICL ]; then
     echo '%.o: %.c' >> config.mak
     echo '	$(CC) $(CFLAGS) -c -Fo$@ $<' >> config.mak
@@ -1216,6 +1258,7 @@ PIC:           $pic
 visualize:     $vis
 bit depth:     $bit_depth
 chroma format: $chroma_format
+opencl:        $opencl
 EOF
 
 echo >> config.log

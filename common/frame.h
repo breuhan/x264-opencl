@@ -171,6 +171,20 @@ typedef struct x264_frame
     /* user frame properties */
     uint8_t *mb_info;
     void (*mb_info_free)( void* );
+
+#if HAVE_OPENCL
+    struct
+    {
+        cl_mem scaled_image2Ds[NUM_IMAGE_SCALES];
+        cl_mem luma_hpel;
+        cl_mem inv_qscale_factor;
+        cl_mem intra_cost;
+        cl_mem lowres_mvs0;
+        cl_mem lowres_mvs1;
+        cl_mem lowres_mv_costs0;
+        cl_mem lowres_mv_costs1;
+    } opencl;
+#endif
 } x264_frame_t;
 
 /* synchronized frame list */

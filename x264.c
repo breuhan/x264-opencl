@@ -806,6 +806,8 @@ static void help( x264_param_t *defaults, int longhelp )
         "                                  as opposed to letting them select different algorithms\n" );
     H2( "      --asm <integer>         Override CPU detection\n" );
     H2( "      --no-asm                Disable all CPU optimizations\n" );
+    H2( "      --no-opencl             Disable use of OpenCL\n" );
+    H2( "      --clbin-file <string>   Specify path of compiled OpenCL kernel cache\n" );
     H2( "      --visualize             Show MB types overlayed on the encoded video\n" );
     H2( "      --dump-yuv <string>     Save reconstructed frames\n" );
     H2( "      --sps-id <integer>      Set SPS and PPS id numbers [%d]\n", defaults->i_sps_id );
@@ -910,6 +912,8 @@ static struct option long_options[] =
     { "ref",         required_argument, NULL, 'r' },
     { "asm",         required_argument, NULL, 0 },
     { "no-asm",            no_argument, NULL, 0 },
+    { "no-opencl",         no_argument, NULL, 0 },
+    { "clbin-file",  required_argument, NULL, 0 },
     { "sar",         required_argument, NULL, 0 },
     { "fps",         required_argument, NULL, OPT_FPS },
     { "frames",      required_argument, NULL, OPT_FRAMES },

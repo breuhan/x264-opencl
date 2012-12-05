@@ -37,6 +37,10 @@
 #include "common/visualize.h"
 #endif
 
+#if HAVE_OPENCL
+#include "opencl.c"
+#endif
+
 //#define DEBUG_MB_TYPE
 
 #define bs_write_ue bs_write_ue_big
@@ -540,6 +544,21 @@ static int x264_validate_parameters( x264_t *h, int b_open )
     h->i_thread_frames = h->param.b_sliced_threads ? 1 : h->param.i_threads;
     if( h->i_thread_frames > 1 )
         h->param.nalu_process = NULL;
+
+#ifndef HAVE_OPENCL
+    if( h->param.b_opencl )
+    {
+        x264_log( h, X264_LOG_WARNING, "not compiled with OpenCL support!\n" );
+        h->param.b_opencl = 0;
+    }
+#endif
+#if BIT_DEPTH > 8
+    if( h->param.b_opencl )
+    {
+        x264_log( h, X264_LOG_WARNING, "OpenCL lookahead does not support high bit depth!\n" );
+        h->param.b_opencl = 0;
+    }
+#endif
 
     h->param.i_keyint_max = x264_clip3( h->param.i_keyint_max, 1, X264_KEYINT_MAX_INFINITE );
     if( h->param.i_keyint_max == 1 )
@@ -1382,6 +1401,14 @@ x264_t *x264_encoder_open( x264_param_t *param )
         if( allocate_threadlocal_data && x264_macroblock_cache_allocate( h->thread[i] ) < 0 )
             goto fail;
     }
+
+#if HAVE_OPENCL
+    if( h->param.b_opencl )
+    {
+        if( x264_opencl_init( h ) )
+            h->param.b_opencl = 0;
+    }
+#endif
 
     if( x264_lookahead_init( h, i_slicetype_length ) )
         goto fail;
@@ -3545,6 +3572,10 @@ void    x264_encoder_close  ( x264_t *h )
     int b_print_pcm = h->stat.i_mb_count[SLICE_TYPE_I][I_PCM]
                    || h->stat.i_mb_count[SLICE_TYPE_P][I_PCM]
                    || h->stat.i_mb_count[SLICE_TYPE_B][I_PCM];
+
+#if HAVE_OPENCL
+    x264_opencl_free( h );
+#endif
 
     x264_lookahead_delete( h );
 

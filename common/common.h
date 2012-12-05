@@ -93,6 +93,15 @@ do {\
 #include <assert.h>
 #include <limits.h>
 
+#if HAVE_OPENCL
+#    define NUM_IMAGE_SCALES 4
+#       ifdef __APPLE__
+#           include <OpenCL/cl.h>
+#       else
+#           include <CL/cl.h>
+#       endif
+#endif
+
 #if HAVE_INTERLACED
 #   define MB_INTERLACED h->mb.b_interlaced
 #   define SLICE_MBAFF h->sh.b_mbaff
@@ -935,6 +944,65 @@ struct x264_t
     struct visualize_t *visualize;
 #endif
     x264_lookahead_t *lookahead;
+
+#if HAVE_OPENCL
+#define MAX_FINISH_COPIES 1024
+#define PAGE_LOCKED_BUF_SIZE 32 * 1024 * 1024
+    struct
+    {
+        cl_context       context;
+        cl_device_id     device;
+        cl_command_queue queue;
+
+        cl_program       lookahead_program;
+        cl_int           last_buf;
+
+        cl_mem           page_locked_buffer;
+        char            *page_locked_ptr;
+        int              pl_occupancy;
+
+        struct
+        {
+            void *src;
+            void *dest;
+            int   bytes;
+        } copies[MAX_FINISH_COPIES];
+        int         num_copies;
+
+        int         b_device_AMD_SI;
+
+        /* downscale lowres luma */
+        cl_kernel   downscale_hpel_kernel;
+        cl_kernel   downscale_kernel1;
+        cl_kernel   downscale_kernel2;
+        cl_mem      luma_16x16_image[2];
+
+        /* weightp filtering */
+        cl_kernel   weightp_hpel_kernel;
+        cl_kernel   weightp_scaled_images_kernel;
+        cl_mem      weighted_scaled_images[NUM_IMAGE_SCALES];
+        cl_mem      weighted_luma_hpel;
+
+        /* intra */
+        cl_kernel   memset_kernel;
+        cl_kernel   intra_kernel;
+        cl_kernel   rowsum_intra_kernel;
+        cl_mem      row_satds[2];
+
+        /* hierarchical motion estimation */
+        cl_kernel   hme_kernel;
+        cl_kernel   subpel_refine_kernel;
+        cl_mem      mv_buffers[2];
+        cl_mem      lowres_mv_costs;
+        cl_mem      mvp_buffer;
+
+        /* bidir */
+        cl_kernel   mode_select_kernel;
+        cl_kernel   rowsum_inter_kernel;
+        cl_mem      lowres_costs[2];
+        cl_mem      frame_stats[2]; /* cost_est, cost_est_aq, intra_mbs */
+    } opencl;
+#endif
 };
 
 // included at the end because it needs x264_t
